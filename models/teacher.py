@@ -34,8 +34,6 @@ class LLMFeatureExtractor(torch.nn.Module):
 
     @torch.no_grad()
     def forward(self, pil_images):
-        # Processa ogni immagine individualmente (in deepseek dovrebbe esserci un errore e nella funzione che processa le immagini
-        # per batch c'è una funzione che prevede solo un'immagine in input, creando conflitto)
         processed_outputs = []
         for image in pil_images:
             conversation = copy.deepcopy(self.conversation_template)
