@@ -25,7 +25,7 @@ def infer(args):
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Dataloader.
+    # Data loader
     test_loader, max_hw = get_data_loader(
         "test", class_name = args.class_name,
         img_size = args.img_size,
@@ -35,7 +35,7 @@ def infer(args):
     vit_fe = ViTFeatureExtractor(layers = [7,11]).to(device, dtype=torch.bfloat16).eval()
     llm_fe = LLMFeatureExtractor().to(device).eval()
 
-    # Model instantiation.
+    # Model instantiation
     vit_net = FeatureProjectionMLP(in_features=vit_fe.embed_dim, out_features=vit_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
     llm_net = FeatureProjectionMLP(in_features=llm_fe.embed_dim, out_features=llm_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
 
@@ -45,11 +45,10 @@ def infer(args):
     vit_net.load_state_dict(torch.load(vit_net_path, map_location=device, weights_only=False))
     llm_net.load_state_dict(torch.load(llm_net_path, map_location=device, weights_only=False))
 
-    # Make students non-trainable.
     vit_net.eval()
     llm_net.eval()
 
-    # Gaussian blur parameters.
+    # Gaussian blur parameters
     w_l, w_u = 5, 7
     pad_l, pad_u = 2, 3
     weight_l = torch.ones(1, 1, w_l, w_l, device=device, dtype=torch.bfloat16)/(w_l**2)
@@ -75,11 +74,11 @@ def infer(args):
 
             start_event.record()
 
-            # 1. Feature extraction.
+            # Feature extraction
             vit_1st_feats, vit_2nd_feats = vit_fe(tensor_img)
             llm_1st_feats, llm_2nd_feats = llm_fe(pil_img)
 
-            # 4. Nets prediction.
+            # Nets prediction
             predicted_vit_2nd_feats = vit_net(vit_1st_feats)
             predicted_llm_2nd_feats = llm_net(llm_1st_feats)
 
@@ -99,10 +98,10 @@ def infer(args):
 
             combined_anomaly_map = vit_map_reshaped * llm_map_resized
 
-            # Upsample to original resolution.
+            # Upsample to original resolution
             combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size = [max_hw, max_hw], mode = 'bilinear')
 
-            # Approximated Gaussian blur.
+            # Approximated Gaussian blur
             combined_anomaly_map = torch.nn.functional.conv2d(input = combined_anomaly_map, padding = pad_l, weight = weight_l)
             combined_anomaly_map = torch.nn.functional.conv2d(input = combined_anomaly_map, padding = pad_l, weight = weight_l)
             combined_anomaly_map = torch.nn.functional.conv2d(input = combined_anomaly_map, padding = pad_l, weight = weight_l)
@@ -123,15 +122,15 @@ def infer(args):
 
             inference_time.append(inf_time)
 
-            # 7. Prediction and ground-truth accumulation.
+            # 7. Prediction and ground-truth accumulation
             gts.append(gt.squeeze().cpu().detach().numpy())
             predictions.append(combined_anomaly_map.to(torch.float32).cpu().detach().numpy())
 
-            # GTs.
+            # GTs
             image_labels.append(label)
             pixel_labels.extend(gt.flatten().cpu().detach().numpy())
 
-            # Predictions.
+            # Predictions
             K = int((combined_anomaly_map.shape[0] * combined_anomaly_map.shape[1]) * 0.001)
             global_score = torch.topk(combined_anomaly_map.flatten(), k=K)[0].mean().to(torch.float32).cpu().detach().numpy()
 
@@ -159,14 +158,14 @@ def infer(args):
                 axs[2].imshow(combined_anomaly_map.to(torch.float32).cpu().detach().numpy(), cmap=plt.cm.jet)
                 axs[2].set_title('Anomaly Map')
 
-                # Remove ticks and labels from all subplots.
+                # Remove ticks and labels from all subplots
                 for ax in axs.flat:
                     ax.set_xticks([])
                     ax.set_yticks([])
                     ax.set_xticklabels([])
                     ax.set_yticklabels([])
 
-                # Adjust the layout and spacing.
+                # Adjust the layout and spacing
                 plt.tight_layout()
 
                 plt.savefig(os.path.join(save_path, image_name_str), dpi = 256)
@@ -176,7 +175,7 @@ def infer(args):
 
                 plt.close()
 
-    # Calculate AD&S metrics.
+    # Calculate AD&S metrics
     au_pros_q4, _, weights = calculate_au_pro(gts, predictions, weighted = False)
 
     q1, q2, q3 = np.quantile(weights, 0.25), np.quantile(weights, 0.5), np.quantile(weights, 0.75)
