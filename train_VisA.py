@@ -4,12 +4,22 @@ import torch
 import wandb
 from itertools import chain
 from tqdm import tqdm, trange
+import logging
+import warnings
 
 from utils.loader_VisA import get_data_loader
 from utils.general_utils import set_seeds
 
-from models.teacher import FeatureExtractor
-from models.students import FeatureProjectionMLP
+from models.teacher import LLMFeatureExtractor, ViTFeatureExtractor
+from models.student import FeatureProjectionMLP
+
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def train(args):
@@ -103,7 +113,7 @@ def train(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'Training framework')
 
-    parser.add_argument('--dataset_path', default = './DATASETS/visa', type = str, 
+    parser.add_argument('--dataset_path', default = './datasets/visa', type = str, 
                         help = 'Dataset path.')
 
     parser.add_argument('--checkpoint_savepath', default = './checkpoints/checkpoints_visa', type = str, 
@@ -115,13 +125,13 @@ if __name__ == '__main__':
     parser.add_argument('--epochs_no', default = 50, type = int,
                         help = 'Number of epochs to train.')
 
-    parser.add_argument('--img_size', default = 1036, type = int,
+    parser.add_argument('--img_size', default = 384, type = int,
                         help = 'Square image resolution.')
 
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'final_model', type = str, 
+    parser.add_argument('--label', default = 'ref_MLLM', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()

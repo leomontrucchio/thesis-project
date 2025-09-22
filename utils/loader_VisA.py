@@ -70,8 +70,7 @@ class TestDataset(BaseAnomalyDetectionDataset):
                 tot_labels.extend([0] * len(rgb_paths))
             elif defect_type == 'bad':
                 rgb_paths = glob.glob(os.path.join(self.img_path, defect_type) + "/*.JPG")
-                gt_root_path = os.path.dirname(self.img_path)
-                gt_paths = glob.glob(os.path.join(gt_root_path, 'ground_truth', defect_type) + "/*.png")
+                gt_paths = glob.glob(os.path.join(self.img_path, 'ground_truth', defect_type) + "/*.png")
                 rgb_paths.sort()
                 gt_paths.sort()
                 img_tot_paths.extend(rgb_paths)

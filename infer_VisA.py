@@ -284,7 +284,7 @@ if __name__ == '__main__':
     parser.add_argument('--produce_qualitatives', default = True, action = 'store_true',
                         help = 'Whether to produce qualitatives or not.')
 
-    parser.add_argument('--dataset_path', default = './DATASETS/visa', type = str,
+    parser.add_argument('--dataset_path', default = './datasets/visa', type = str,
                         help = 'Dataset path.')
 
     parser.add_argument('--class_name', default = "candle", type = str,
@@ -299,7 +299,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'final_model', type = str, 
+    parser.add_argument('--label', default = 'ref_MLLM', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()
