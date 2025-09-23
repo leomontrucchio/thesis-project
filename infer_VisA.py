@@ -10,8 +10,8 @@ import pandas as pd
 from utils.loader_VisA import get_data_loader
 from utils.general_utils import set_seeds
 
-from models.teacher import FeatureExtractor
-from models.students import FeatureProjectionMLP
+from models.teacher import LLMFeatureExtractor, ViTFeatureExtractor
+from models.student import FeatureProjectionMLP
 
 from utils.metrics_utils import calculate_au_pro
 from sklearn.metrics import roc_auc_score
