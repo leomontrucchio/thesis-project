@@ -1,8 +1,6 @@
 import torch
 from transformers import AutoModelForCausalLM
 from deepseek_vl2.models import DeepseekVLV2Processor, siglip_vit
-import PIL
-from typing import List, Tuple
 import copy
 
 class LLMFeatureExtractor(torch.nn.Module):
@@ -26,10 +24,24 @@ class LLMFeatureExtractor(torch.nn.Module):
         self.embed_dim = self.model.config.language_config.hidden_size
         self.num_global_patches = 14 * 14
 
-        prompt_text = "This image shows <|ref|>industrial products in perfect condition that meet all quality standards<|/ref|>."
+        # prompt_text = "Provide a detailed description of these four defect-free candles."
+        # self.conversation_template = [
+           # {"role": "<|User|>", "content": f"<image>\n{prompt_text}"},
+           # {"role": "<|Assistant|>", "content": ""}
+        # ]
+        generated_technical_description = "I can confirm that these are four identical round candles arranged in a square pattern on a dark background. Each candle has a smooth, uniform surface with no visible imperfections or blemishes. The wick is centered and appears straight and unblemished. The color of each candle is consistent, with a creamy white hue that suggests purity and quality. The edges of the candles are sharp and well-defined, indicating precise manufacturing. There are no signs of melting or warping, which would suggest improper handling or exposure to heat. Overall, these candles represent an ideal standard for manufacturing, with every attribute pointing to their flawless condition."
+
+
         self.conversation_template = [
-            {"role": "<|User|>", "content": f"<image>\n{prompt_text}"},
-            {"role": "<|Assistant|>", "content": ""}
+            {
+                "role": "<|User|>",
+                "content": "<|grounding|><image>\nYou are a Quality Inspector. Please provide your official assessment of <|ref|>these four candles<|/ref|>.",
+                "images": ["path/to/current_training_image.jpg"],
+            },
+            {
+                "role": "<|Assistant|>",
+                "content": generated_technical_description,
+            },
         ]
 
     @torch.no_grad()

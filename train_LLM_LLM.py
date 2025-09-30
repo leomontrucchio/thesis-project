@@ -10,7 +10,7 @@ import warnings
 from utils.loader_VisA import get_data_loader
 from utils.general_utils import set_seeds
 
-from models.teacher import LLMFeatureExtractor, ViTFeatureExtractor
+from models.teacher import LLMFeatureExtractor
 from models.student import FeatureProjectionMLP
 
 
@@ -43,14 +43,13 @@ def train(args):
         dataset_path = args.dataset_path)
 
     # Feature extractor.
-    vit_fe = ViTFeatureExtractor(layers = [7,11]).to(device, dtype=torch.bfloat16).eval()
-    llm_fe = LLMFeatureExtractor().to(device).eval()
+    fe = LLMFeatureExtractor().to(device).eval()
 
     # Model instantiation.
-    vit_net = FeatureProjectionMLP(in_features=vit_fe.embed_dim, out_features=vit_fe.embed_dim, act_layer=torch.nn.GELU).to(device=device, dtype=torch.bfloat16)
-    llm_net = FeatureProjectionMLP(in_features=llm_fe.embed_dim, out_features=llm_fe.embed_dim, act_layer=torch.nn.SiLU).to(device=device, dtype=torch.bfloat16)
+    backward_net = FeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim).to(device=device, dtype=torch.bfloat16)
+    forward_net = FeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim).to(device=device, dtype=torch.bfloat16)
 
-    optimizer = torch.optim.Adam(params = chain(vit_net.parameters(), llm_net.parameters()), lr = 1e-4)
+    optimizer = torch.optim.Adam(params = chain(backward_net.parameters(), forward_net.parameters()), lr = 1e-4)
 
     cos_sim = torch.nn.CosineSimilarity(dim = -1, eps = 1e-06)
 
@@ -59,24 +58,21 @@ def train(args):
         global_loss = []
 
         for pil_img, tensor_img in tqdm(train_loader, desc = f'    Extracting features from class: {args.class_name}.'):
-            vit_net.train(), llm_net.train()
-
-            tensor_img = tensor_img.to(device, dtype=torch.bfloat16)
+            backward_net.train(), forward_net.train()
 
             # 1. Feature extraction.
             with torch.no_grad():
-                vit_1st_feats, vit_2nd_feats = vit_fe(tensor_img)
-                llm_1st_feats, llm_2nd_feats = llm_fe(pil_img)
+                earlier_patch, later_patch = fe(pil_img)
 
             # 2. Nets prediction.
-            predicted_vit_feats = vit_net(vit_1st_feats)
-            predicted_llm_feats = llm_net(llm_1st_feats)
+            predicted_later_patch = forward_net(earlier_patch)
+            predicted_earlier_patch = backward_net(later_patch)
 
             # 3. Losses.
-            loss_vit = 1 - cos_sim(predicted_vit_feats, vit_2nd_feats).mean()
-            loss_llm = 1 - cos_sim(predicted_llm_feats, llm_2nd_feats).mean()
+            loss_later = 1 - cos_sim(predicted_later_patch, later_patch).mean()
+            loss_earlier = 1 - cos_sim(predicted_earlier_patch, earlier_patch).mean()
 
-            loss = loss_vit + loss_llm
+            loss = loss_later + loss_earlier
 
             # 4. Logging.
             global_loss.append(loss.item())
@@ -104,8 +100,8 @@ def train(args):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    torch.save(vit_net.state_dict(), os.path.join(directory, 'vit_net_' + model_name + '.pth'))
-    torch.save(llm_net.state_dict(), os.path.join(directory, 'llm_net_' + model_name + '.pth'))
+    torch.save(backward_net.state_dict(), os.path.join(directory, 'backward_net_' + model_name + '.pth'))
+    torch.save(forward_net.state_dict(), os.path.join(directory, 'forward_net_' + model_name + '.pth'))
 
     wandb.finish()
 
