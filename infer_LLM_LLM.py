@@ -10,7 +10,7 @@ import pandas as pd
 from utils.loader_VisA import get_data_loader
 from utils.general_utils import set_seeds
 
-from models.teacher import LLMFeatureExtractor, ViTFeatureExtractor
+from models.teacher import LLMFeatureExtractor
 from models.student import FeatureProjectionMLP
 
 from utils.metrics_utils import calculate_au_pro
@@ -32,21 +32,20 @@ def infer(args):
         dataset_path = args.dataset_path)
 
     # Feature extractors
-    vit_fe = ViTFeatureExtractor(layers = [7,11]).to(device, dtype=torch.bfloat16).eval()
-    llm_fe = LLMFeatureExtractor().to(device).eval()
+    fe = LLMFeatureExtractor().to(device).eval()
 
     # Model instantiation
-    vit_net = FeatureProjectionMLP(in_features=vit_fe.embed_dim, out_features=vit_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
-    llm_net = FeatureProjectionMLP(in_features=llm_fe.embed_dim, out_features=llm_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
+    backward_net = FeatureProjectionMLP(in_features=fe.embed_dim, out_features=fe.embed_dim).to(device=device, dtype=torch.bfloat16)
+    forward_net = FeatureProjectionMLP(in_features=fe.embed_dim, out_features=fe.embed_dim).to(device=device, dtype=torch.bfloat16)
 
-    vit_net_path = rf'{args.checkpoint_folder}/{args.class_name}/vit_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
-    llm_net_path = rf'{args.checkpoint_folder}/{args.class_name}/llm_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
+    forward_net_path = rf'{args.checkpoint_folder}/{args.class_name}/forward_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
+    backward_net_path = rf'{args.checkpoint_folder}/{args.class_name}/backward_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
 
-    vit_net.load_state_dict(torch.load(vit_net_path, map_location=device, weights_only=False))
-    llm_net.load_state_dict(torch.load(llm_net_path, map_location=device, weights_only=False))
+    backward_net.load_state_dict(torch.load(backward_net_path, map_location=device, weights_only=False))
+    forward_net.load_state_dict(torch.load(forward_net_path, map_location=device, weights_only=False))
 
-    vit_net.eval()
-    llm_net.eval()
+    backward_net.eval()
+    forward_net.eval()
 
     # Gaussian blur parameters
     w_l, w_u = 5, 7
@@ -70,38 +69,25 @@ def infer(args):
 
         with torch.no_grad():
 
-            tensor_img = tensor_img.to(device, dtype=torch.bfloat16)
-
             start_event.record()
 
             # Feature extraction
-            vit_1st_feats, vit_2nd_feats = vit_fe(tensor_img)
-            llm_1st_feats, llm_2nd_feats = llm_fe(pil_img)
+            middle_patch, last_patch = fe(pil_img)
 
             # Nets prediction
-            predicted_vit_2nd_feats = vit_net(vit_1st_feats)
-            predicted_llm_2nd_feats = llm_net(llm_1st_feats)
+            predicted_middle_patch = backward_net(last_patch)
+            predicted_last_patch = forward_net(middle_patch)
 
             # si potrebbe usare torch.linalg.norm(predicted_vit_2nd_feats - vit_2nd_feats, dim=-1)? come nel paper
-            vit_anomaly_map = (torch.nn.functional.normalize(predicted_vit_2nd_feats, dim = -1) - torch.nn.functional.normalize(vit_2nd_feats, dim = -1)).pow(2).sum(-1).sqrt()
-            llm_anomaly_map = (torch.nn.functional.normalize(predicted_llm_2nd_feats, dim = -1) - torch.nn.functional.normalize(llm_2nd_feats, dim = -1)).pow(2).sum(-1).sqrt()
+            middle_anomaly_map = (torch.nn.functional.normalize(predicted_middle_patch, dim = -1) - torch.nn.functional.normalize(middle_patch, dim = -1)).pow(2).sum(-1).sqrt()
+            last_anomaly_map = (torch.nn.functional.normalize(predicted_last_patch, dim = -1) - torch.nn.functional.normalize(last_patch, dim = -1)).pow(2).sum(-1).sqrt()
 
-            vit_map_reshaped = vit_anomaly_map.reshape(1, 1, 27, 27)
-            llm_map_reshaped = llm_anomaly_map.reshape(1, 1, 14, 14)
+            combined_anomaly_map = (middle_anomaly_map * last_anomaly_map).reshape(1, 1, 14, 14)
 
-            llm_map_resized = torch.nn.functional.interpolate(
-                llm_map_reshaped,
-                size=(27, 27),
-                mode='bilinear',
-                align_corners=False
-            )
-
-            combined_anomaly_map = vit_map_reshaped * llm_map_resized
-
-            # Upsample to original resolution
+            # Upsample to original resolution.
             combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size = [max_hw, max_hw], mode = 'bilinear')
 
-            # Approximated Gaussian blur
+            # Approximated Gaussian blur.
             combined_anomaly_map = torch.nn.functional.conv2d(input = combined_anomaly_map, padding = pad_l, weight = weight_l)
             combined_anomaly_map = torch.nn.functional.conv2d(input = combined_anomaly_map, padding = pad_l, weight = weight_l)
             combined_anomaly_map = torch.nn.functional.conv2d(input = combined_anomaly_map, padding = pad_l, weight = weight_l)
@@ -299,7 +285,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'assistant_from_deepseek_MLLM', type = str, 
+    parser.add_argument('--label', default = 'describe_db_LLM', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()

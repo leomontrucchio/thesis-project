@@ -131,7 +131,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'assistant_comparison_with_perfect_MLLM', type = str, 
+    parser.add_argument('--label', default = 'assistant_from_deepseek_MLLM', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()
