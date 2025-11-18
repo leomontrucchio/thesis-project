@@ -1,6 +1,7 @@
 __pycache__
 models/__pycache__
-utils/__pycache__
+utils_visa/__pycache__
+utils_mvtec_loco/__pycache__
 checkpoints
 wandb
 results

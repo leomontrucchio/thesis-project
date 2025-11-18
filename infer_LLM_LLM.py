@@ -7,16 +7,16 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
-from utils.loader_VisA import get_data_loader
-from utils.general_utils import set_seeds
+from utils_visa.loader_VisA import get_data_loader
+from utils_visa.general_utils import set_seeds
 
 from models.teacher import LLMFeatureExtractor
 from models.student import FeatureProjectionMLP
 
-from utils.metrics_utils import calculate_au_pro
+from utils_visa.metrics_utils import calculate_au_pro
 from sklearn.metrics import roc_auc_score
 
-from utils.general_utils import set_seeds, siglip_denormalize
+from utils_visa.general_utils import set_seeds, siglip_denormalize
 
 
 def infer(args):
@@ -32,7 +32,7 @@ def infer(args):
         dataset_path = args.dataset_path)
 
     # Feature extractors
-    fe = LLMFeatureExtractor().to(device).eval()
+    fe = LLMFeatureExtractor(layer1_idx=0, layer2_idx=-1).to(device).eval()
 
     # Model instantiation
     backward_net = FeatureProjectionMLP(in_features=fe.embed_dim, out_features=fe.embed_dim).to(device=device, dtype=torch.bfloat16)
@@ -258,10 +258,10 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint_folder', default = './checkpoints/checkpoints_visa', type = str,
                         help = 'Path to the folder containing students checkpoints.')
 
-    parser.add_argument('--qualitative_folder', default = './results/qualitatives_visa', type = str,
+    parser.add_argument('--qualitative_folder', default = './results/visa/qualitatives_visa', type = str,
                         help = 'Path to the folder in which to save the qualitatives.')
 
-    parser.add_argument('--quantitative_folder', default = './results/quantitatives_visa', type = str,
+    parser.add_argument('--quantitative_folder', default = './results/visa/quantitatives_visa', type = str,
                         help = 'Path to the folder in which to save the quantitatives.')
 
     parser.add_argument('--visualize_plot', default = False, action = 'store_true',
@@ -285,8 +285,9 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'describe_db_LLM', type = str, 
+    parser.add_argument('--label', default = 'ground_db_LLM', type = str, 
                         help = 'Label to identify the experiment.')
+
 
     args = parser.parse_args()
     infer(args)

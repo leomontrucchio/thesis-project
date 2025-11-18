@@ -7,8 +7,8 @@ from tqdm import tqdm, trange
 import logging
 import warnings
 
-from utils.loader_VisA import get_data_loader
-from utils.general_utils import set_seeds
+from utils_visa.loader_VisA import get_data_loader
+from utils_visa.general_utils import set_seeds
 
 from models.teacher import LLMFeatureExtractor, ViTFeatureExtractor
 from models.student import FeatureProjectionMLP

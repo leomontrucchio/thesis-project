@@ -6,9 +6,10 @@ from itertools import chain
 from tqdm import tqdm, trange
 import logging
 import warnings
+import torchvision.transforms.functional as F
 
-from utils.loader_VisA import get_data_loader
-from utils.general_utils import set_seeds
+from utils_visa.loader_VisA import get_data_loader
+from utils_visa.general_utils import set_seeds
 
 from models.teacher import LLMFeatureExtractor
 from models.student import FeatureProjectionMLP
@@ -43,7 +44,7 @@ def train(args):
         dataset_path = args.dataset_path)
 
     # Feature extractor.
-    fe = LLMFeatureExtractor().to(device).eval()
+    fe = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
 
     # Model instantiation.
     backward_net = FeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim).to(device=device, dtype=torch.bfloat16)
@@ -59,6 +60,8 @@ def train(args):
 
         for pil_img, tensor_img in tqdm(train_loader, desc = f'    Extracting features from class: {args.class_name}.'):
             backward_net.train(), forward_net.train()
+
+            pil_img = F.to_pil_image(tensor_img)
 
             # 1. Feature extraction.
             with torch.no_grad():
@@ -127,7 +130,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'describe_db_LLM', type = str, 
+    parser.add_argument('--label', default = 'assistant_inspect_db_LLM_0_1', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()

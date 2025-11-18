@@ -7,16 +7,16 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
-from utils.loader_VisA import get_data_loader
-from utils.general_utils import set_seeds
+from utils_visa.loader_VisA import get_data_loader
+from utils_visa.general_utils import set_seeds
 
 from models.teacher import LLMFeatureExtractor, ViTFeatureExtractor
-from models.student import FeatureProjectionMLP
+from models.student import FeatureProjectionMLP, ResidualFeatureProjectionMLP
 
-from utils.metrics_utils import calculate_au_pro
+from utils_visa.metrics_utils import calculate_au_pro
 from sklearn.metrics import roc_auc_score
 
-from utils.general_utils import set_seeds, siglip_denormalize
+from utils_visa.general_utils import set_seeds, siglip_denormalize
 
 
 def infer(args):
@@ -32,21 +32,29 @@ def infer(args):
         dataset_path = args.dataset_path)
 
     # Feature extractors
-    vit_fe = ViTFeatureExtractor(layers = [7,11]).to(device, dtype=torch.bfloat16).eval()
-    llm_fe = LLMFeatureExtractor().to(device).eval()
+    vit_fe = ViTFeatureExtractor(layers = [1,5]).to(device, dtype=torch.bfloat16).eval()
+    llm_fe = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
 
     # Model instantiation
-    vit_net = FeatureProjectionMLP(in_features=vit_fe.embed_dim, out_features=vit_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
-    llm_net = FeatureProjectionMLP(in_features=llm_fe.embed_dim, out_features=llm_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
+    vit_fw_net = ResidualFeatureProjectionMLP(in_features = vit_fe.embed_dim, out_features = vit_fe.embed_dim, reduction_factor=1).to(device=device, dtype=torch.bfloat16)
+    vit_bw_net = ResidualFeatureProjectionMLP(in_features = vit_fe.embed_dim, out_features = vit_fe.embed_dim, reduction_factor=1).to(device=device, dtype=torch.bfloat16)
+    llm_fw_net = FeatureProjectionMLP(in_features=llm_fe.embed_dim, out_features=llm_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
+    llm_bw_net = FeatureProjectionMLP(in_features=llm_fe.embed_dim, out_features=llm_fe.embed_dim).to(device=device, dtype=torch.bfloat16)
 
-    vit_net_path = rf'{args.checkpoint_folder}/{args.class_name}/vit_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
-    llm_net_path = rf'{args.checkpoint_folder}/{args.class_name}/llm_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
+    vit_fw_net_path = rf"{args.checkpoint_folder}/{args.class_name}/forward_net_l2bt_deepseek_res_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth"
+    vit_bw_net_path = rf"{args.checkpoint_folder}/{args.class_name}/backward_net_l2bt_deepseek_res_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth"
+    llm_fw_net_path = rf'{args.checkpoint_folder}/{args.class_name}/forward_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
+    llm_bw_net_path = rf'{args.checkpoint_folder}/{args.class_name}/backward_net_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth'
 
-    vit_net.load_state_dict(torch.load(vit_net_path, map_location=device, weights_only=False))
-    llm_net.load_state_dict(torch.load(llm_net_path, map_location=device, weights_only=False))
+    vit_fw_net.load_state_dict(torch.load(vit_fw_net_path, map_location=device, weights_only=False))
+    vit_bw_net.load_state_dict(torch.load(vit_bw_net_path, map_location=device, weights_only=False))
+    llm_fw_net.load_state_dict(torch.load(llm_fw_net_path, map_location=device, weights_only=False))
+    llm_bw_net.load_state_dict(torch.load(llm_bw_net_path, map_location=device, weights_only=False))
 
-    vit_net.eval()
-    llm_net.eval()
+    vit_fw_net.eval()
+    vit_bw_net.eval()
+    llm_fw_net.eval()
+    llm_bw_net.eval()
 
     # Gaussian blur parameters
     w_l, w_u = 5, 7
@@ -79,24 +87,41 @@ def infer(args):
             llm_1st_feats, llm_2nd_feats = llm_fe(pil_img)
 
             # Nets prediction
-            predicted_vit_2nd_feats = vit_net(vit_1st_feats)
-            predicted_llm_2nd_feats = llm_net(llm_1st_feats)
+            predicted_vit_2nd_feats = vit_fw_net(vit_1st_feats)
+            predicted_vit_1st_feats = vit_bw_net(vit_2nd_feats)
+            predicted_llm_2nd_feats = llm_fw_net(llm_1st_feats)
+            predicted_llm_1st_feats = llm_bw_net(llm_2nd_feats)
 
             # si potrebbe usare torch.linalg.norm(predicted_vit_2nd_feats - vit_2nd_feats, dim=-1)? come nel paper
-            vit_anomaly_map = (torch.nn.functional.normalize(predicted_vit_2nd_feats, dim = -1) - torch.nn.functional.normalize(vit_2nd_feats, dim = -1)).pow(2).sum(-1).sqrt()
-            llm_anomaly_map = (torch.nn.functional.normalize(predicted_llm_2nd_feats, dim = -1) - torch.nn.functional.normalize(llm_2nd_feats, dim = -1)).pow(2).sum(-1).sqrt()
+            vit_fw_anomaly_map = (torch.nn.functional.normalize(predicted_vit_2nd_feats, dim = -1) - torch.nn.functional.normalize(vit_2nd_feats, dim = -1)).pow(2).sum(-1).sqrt()
+            vit_bw_anomaly_map = (torch.nn.functional.normalize(predicted_vit_1st_feats, dim = -1) - torch.nn.functional.normalize(vit_1st_feats, dim = -1)).pow(2).sum(-1).sqrt()
+            llm_fw_anomaly_map = (torch.nn.functional.normalize(predicted_llm_2nd_feats, dim = -1) - torch.nn.functional.normalize(llm_2nd_feats, dim = -1)).pow(2).sum(-1).sqrt()
+            llm_bw_anomaly_map = (torch.nn.functional.normalize(predicted_llm_1st_feats, dim = -1) - torch.nn.functional.normalize(llm_1st_feats, dim = -1)).pow(2).sum(-1).sqrt()
 
-            vit_map_reshaped = vit_anomaly_map.reshape(1, 1, 27, 27)
-            llm_map_reshaped = llm_anomaly_map.reshape(1, 1, 14, 14)
+            vit_fw_map_reshaped = vit_fw_anomaly_map.reshape(1, 1, 27, 27)
+            vit_bw_map_reshaped = vit_bw_anomaly_map.reshape(1, 1, 27, 27)
+            llm_fw_map_reshaped = llm_fw_anomaly_map.reshape(1, 1, 14, 14)
+            llm_bw_map_reshaped = llm_bw_anomaly_map.reshape(1, 1, 14, 14)
 
-            llm_map_resized = torch.nn.functional.interpolate(
-                llm_map_reshaped,
+            combined_vit_anom_map = vit_fw_map_reshaped * vit_bw_map_reshaped
+
+            llm_fw_map_resized = torch.nn.functional.interpolate(
+                llm_fw_map_reshaped,
                 size=(27, 27),
                 mode='bilinear',
                 align_corners=False
             )
 
-            combined_anomaly_map = vit_map_reshaped * llm_map_resized
+            llm_bw_map_resized = torch.nn.functional.interpolate(
+                llm_bw_map_reshaped,
+                size=(27, 27),
+                mode='bilinear',
+                align_corners=False
+            )
+
+            combined_llm_anom_map = llm_fw_map_resized * llm_bw_map_resized
+
+            combined_anomaly_map = combined_vit_anom_map * combined_llm_anom_map
 
             # Upsample to original resolution
             combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size = [max_hw, max_hw], mode = 'bilinear')
@@ -272,10 +297,10 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint_folder', default = './checkpoints/checkpoints_visa', type = str,
                         help = 'Path to the folder containing students checkpoints.')
 
-    parser.add_argument('--qualitative_folder', default = './results/qualitatives_visa', type = str,
+    parser.add_argument('--qualitative_folder', default = './results/visa/qualitatives_visa', type = str,
                         help = 'Path to the folder in which to save the qualitatives.')
 
-    parser.add_argument('--quantitative_folder', default = './results/quantitatives_visa', type = str,
+    parser.add_argument('--quantitative_folder', default = './results/visa/quantitatives_visa', type = str,
                         help = 'Path to the folder in which to save the quantitatives.')
 
     parser.add_argument('--visualize_plot', default = False, action = 'store_true',
@@ -299,7 +324,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--label', default = 'assistant_from_deepseek_MLLM', type = str, 
+    parser.add_argument('--label', default = 'assistant_inspect_db_LLM_0_1', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()

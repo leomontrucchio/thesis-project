@@ -1,11 +1,19 @@
 import os
 import torch
-from PIL import Image
+from PIL import Image, ImageOps
 from torchvision import transforms
 import glob
 from torch.utils.data import Dataset, DataLoader
-from utils.general_utils import SquarePad
+from utils_visa.general_utils import SquarePad
 
+
+class DeepSeekPad:
+    def __init__(self, size, fill_color=(127, 127, 127)):
+        self.target_size = (size, size)
+        self.fill_color = fill_color
+
+    def __call__(self, pil_img):
+        return ImageOps.pad(pil_img, self.target_size, color=self.fill_color)
 
 class BaseAnomalyDetectionDataset(Dataset):
     def __init__(self, split, class_name, img_size, dataset_path):
@@ -15,12 +23,13 @@ class BaseAnomalyDetectionDataset(Dataset):
         self.size = img_size
         self.img_path = os.path.join(dataset_path, class_name, split)
 
+        fill_color_rgb = tuple(int(x * 255) for x in self.SIGLIP_MEAN)
+
         self.rgb_transform = transforms.Compose([
-            SquarePad(),
-            transforms.Resize((self.size, self.size), interpolation = transforms.InterpolationMode.BICUBIC),
+            DeepSeekPad(self.size, fill_color=fill_color_rgb),
             transforms.ToTensor(),
-            transforms.Normalize(mean = self.SIGLIP_MEAN, std = self.SIGLIP_STD)
-            ])
+            transforms.Normalize(mean=self.SIGLIP_MEAN, std=self.SIGLIP_STD)
+        ])
 
 class TrainValDataset(BaseAnomalyDetectionDataset):
     def __init__(self, split, class_name, img_size, dataset_path):
