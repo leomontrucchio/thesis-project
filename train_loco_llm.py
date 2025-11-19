@@ -11,8 +11,8 @@ import warnings
 from utils_mvtec_loco.loader_loco import get_data_loader 
 from utils_visa.general_utils import set_seeds
 
-from models.teacher import ViTFeatureExtractor
-from models.student import ResidualFeatureProjectionMLP
+from models.teacher import LLMFeatureExtractor
+from models.student import FeatureProjectionMLP
 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -35,7 +35,7 @@ def train(args):
         # mode = "disabled"
     )
 
-    # Dataloaders.
+    # Dataloader.
     train_loader, _ = get_data_loader(
         "train", class_name = args.class_name,
         img_size = args.img_size, batch_size = args.batch_size,
@@ -47,11 +47,11 @@ def train(args):
         dataset_path = args.dataset_path)
 
     # Feature extractor.
-    fe = ViTFeatureExtractor(layers = [1,5]).to(device).eval()
+    fe = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
 
     # Model instantiation.
-    backward_net = ResidualFeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim, reduction_factor=1).to(device)
-    forward_net = ResidualFeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim, reduction_factor=1).to(device)
+    backward_net = FeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim).to(device=device, dtype=torch.bfloat16)
+    forward_net = FeatureProjectionMLP(in_features = fe.embed_dim, out_features = fe.embed_dim).to(device=device, dtype=torch.bfloat16)
 
     optimizer = torch.optim.Adam(params = chain(backward_net.parameters(), forward_net.parameters()), lr = 1e-4)
 
@@ -64,13 +64,11 @@ def train(args):
         backward_net.train(), forward_net.train()
         global_loss = []
 
-        for pil_img, tensor_img in tqdm(train_loader, desc = f'    Epoch {epoch+1} [Train]'):
-            
-            tensor_img = tensor_img.to(device)
+        for pil_img, _ in tqdm(train_loader, desc = f'    Epoch {epoch+1} [Train]'):
 
             # 1. Feature extraction.
             with torch.no_grad():
-                earlier_patch, later_patch = fe(tensor_img)
+                earlier_patch, later_patch = fe(pil_img)
 
             # 2. Nets prediction.
             predicted_later_patch = forward_net(earlier_patch)
@@ -84,8 +82,9 @@ def train(args):
             # 4. Logging.
             global_loss.append(loss.item())
 
-            wandb.log({"train/batch_loss" : loss.item()})
+            wandb.log({"train/batch_loss" : loss.item(),})
 
+            # 5. Optimization.
             if not torch.isnan(loss) and not torch.isinf(loss):
                 optimizer.zero_grad()
                 loss.backward()
@@ -93,10 +92,9 @@ def train(args):
             else:
                 exit()
 
-
         epoch_train_loss = torch.Tensor(global_loss).mean()
         wandb.log({"train/epoch_loss" : epoch_train_loss})
-        
+
 
         # ------------ [Validation Loop] ------------ #
         
@@ -104,11 +102,9 @@ def train(args):
         global_val_loss = []
 
         with torch.no_grad():
-            for pil_img, tensor_img in tqdm(val_loader, desc = f'    Epoch {epoch+1} [Val]'):
+            for pil_img, _ in tqdm(val_loader, desc = f'    Epoch {epoch+1} [Val]'):
                 
-                tensor_img = tensor_img.to(device)
-
-                earlier_patch, later_patch = fe(tensor_img)
+                earlier_patch, later_patch = fe(pil_img)
 
                 predicted_later_patch = forward_net(earlier_patch)
                 predicted_earlier_patch = backward_net(later_patch)
@@ -132,8 +128,8 @@ def train(args):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    torch.save(forward_net.state_dict(), os.path.join(directory, 'forward_net_' + model_name + '.pth'))
     torch.save(backward_net.state_dict(), os.path.join(directory, 'backward_net_' + model_name + '.pth'))
+    torch.save(forward_net.state_dict(), os.path.join(directory, 'forward_net_' + model_name + '.pth'))
 
     wandb.finish()
 
@@ -143,23 +139,23 @@ if __name__ == '__main__':
 
     parser.add_argument('--dataset_path', default = './datasets/mvtec_loco', type = str, 
                         help = 'Dataset path.')
-    
+
     parser.add_argument('--checkpoint_savepath', default = './checkpoints/checkpoints_loco', type = str, 
                         help = 'Where to save the model checkpoints.')
 
-    parser.add_argument('--class_name', default = "breakfast_box", type = str,
+    parser.add_argument('--class_name', default = 'breakfast_box', type = str,
                         help = 'Category name.')
-    
+
     parser.add_argument('--epochs_no', default = 50, type = int,
                         help = 'Number of epochs to train.')
-    
+
     parser.add_argument('--img_size', default = 384, type = int,
                         help = 'Square image resolution.')
 
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
-    
-    parser.add_argument('--label', default = 'l2bt_deepseek_res_new', type = str,
+
+    parser.add_argument('--label', default = 'assistant_inspect_db_LLM_0_1', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()

@@ -24,21 +24,21 @@ class LLMFeatureExtractor(torch.nn.Module):
         self.embed_dim = self.model.config.language_config.hidden_size
         self.num_global_patches = 14 * 14
 
-        prompt_text = "<|grounding|>This image shows industrial products in perfect condition that meet all quality standards."
-        self.conversation_template = [
-          {"role": "<|User|>", "content": f"<image>\n{prompt_text}"},
-          {"role": "<|Assistant|>", "content": ""}
-        ]
+        # prompt_text = "<|grounding|>This image shows industrial products in perfect condition that meet all quality standards."
         # self.conversation_template = [
-        #     {
-        #         "role": "<|User|>",
-        #         "content": "<|grounding|><image>\nInspect <|ref|>this industrial components<|/ref|> and verify that they meet all quality standards."
-        #     },
-        #     {
-        #         "role": "<|Assistant|>",
-        #         "content": "Inspection complete. The components meet all quality standards and are free from any imperfections.",
-        #     },
+        #   {"role": "<|User|>", "content": f"<image>\n{prompt_text}"},
+        #   {"role": "<|Assistant|>", "content": ""}
         # ]
+        self.conversation_template = [
+            {
+                "role": "<|User|>",
+                "content": "<|grounding|><image>\nInspect <|ref|>this industrial components<|/ref|> and verify that they meet all quality standards."
+            },
+            {
+                "role": "<|Assistant|>",
+                "content": "Inspection complete. The components meet all quality standards and are free from any imperfections.",
+            },
+        ]
 
     @torch.no_grad()
     def forward(self, pil_images):

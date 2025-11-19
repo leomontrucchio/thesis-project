@@ -39,11 +39,9 @@ def infer(args):
     forward_net.load_state_dict(torch.load(forward_net_path, weights_only=False))
     backward_net.load_state_dict(torch.load(backward_net_path, weights_only=False))
 
-    # Send students to GPU.
     forward_net.to(device)
     backward_net.to(device)
 
-    # Make students non-trainable.
     forward_net.eval()
     backward_net.eval()
 

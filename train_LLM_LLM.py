@@ -61,8 +61,6 @@ def train(args):
         for pil_img, tensor_img in tqdm(train_loader, desc = f'    Extracting features from class: {args.class_name}.'):
             backward_net.train(), forward_net.train()
 
-            pil_img = F.to_pil_image(tensor_img)
-
             # 1. Feature extraction.
             with torch.no_grad():
                 earlier_patch, later_patch = fe(pil_img)
