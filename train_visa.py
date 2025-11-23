@@ -63,7 +63,7 @@ def train(args):
         ).to(device)
 
     elif args.students_blocks == 'ViT-LLM':
-        # --- ViT + LLM Parallel, Standard MLP, Custom Activations ---
+        # --- ViT & LLM forward, Standard MLP ---
         
         # Teachers
         teachers['vit_fe'] = ViTFeatureExtractor(layers=[7, 11]).to(device, dtype=dtype).eval()
@@ -114,7 +114,7 @@ def train(args):
 
             tensor_img = tensor_img.to(device, dtype=dtype)
 
-            # 1. Feature extraction.
+            # Feature extraction.
             with torch.no_grad():
                 if args.students_blocks == 'Both ViT':
                     earlier_patch, later_patch = teachers['fe'](tensor_img)
@@ -124,7 +124,7 @@ def train(args):
                 elif args.students_blocks == 'Both LLM':
                     earlier_patch, later_patch = teachers['fe'](pil_img)
 
-            # 2. Nets prediction and losses.
+            # Nets prediction and losses.
             if args.students_blocks in ['Both ViT', 'Both LLM']:
                 # Bidirectional logic (Forward + Backward)
                 pred_later = students['forward_net'](earlier_patch)
@@ -145,11 +145,11 @@ def train(args):
                 
                 loss = loss_vit + loss_llm
 
-            # 3. Logging.
+            # Logging.
             global_loss.append(loss.item())
             wandb.log({"train/batch_loss": loss})
 
-            # 4. Optimization
+            # Optimization
             if not torch.isnan(loss) and not torch.isinf(loss):
                 optimizer.zero_grad()
                 loss.backward()
