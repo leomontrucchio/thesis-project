@@ -4,5 +4,5 @@ class_names=("candle" "capsules" "cashew" "chewinggum" "fryum" "macaroni1" "maca
 
 for class_name in "${class_names[@]}"
     do
-        python3 infer_4stud.py --class_name $class_name 
+        python3 infer_visa.py --class_name $class_name 
     done
