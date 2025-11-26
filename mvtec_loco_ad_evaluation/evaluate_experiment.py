@@ -430,8 +430,23 @@ def get_image_level_detection_metrics_per_image(gt_maps, anomaly_maps):
         }
         # Compute the image-level anomaly score by taking the maximum of the
         # anomaly map.
-        image_level_score = float(np.max(anomaly_map.np_array))
+        # image_level_score = float(np.max(anomaly_map.np_array))
+
+        # --- NOT FROM ORIGINAL ---
+        # Compute the image-level anomaly score by taking the mean of the 
+        # top-K values (0.1% of pixels), instead of just the maximum.
+        
+        flattened_map = anomaly_map.np_array.flatten()
+        # Calculate K as 0.1% of the total number of pixels
+        K = int(len(flattened_map) * 0.001)
+
+        top_k_values = np.partition(flattened_map, -K)[-K:]
+        image_level_score = float(np.mean(top_k_values))
+            
+        # We continue to use the 'max' key to stay compatible with the 
+        # aggregation function 'get_image_level_detection_metrics_aggregated'
         image_results['anomaly_scores']['max'] = image_level_score
+        # -------------------------
         per_image_results.append(image_results)
 
     return per_image_results
