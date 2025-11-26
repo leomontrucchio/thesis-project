@@ -6,7 +6,7 @@ from itertools import chain
 from tqdm import tqdm, trange
 
 from utils_loco.loader_loco import get_data_loader 
-from utils_visa.general_utils import set_seeds
+from utils_loco.general_utils import set_seeds
 
 from models.teacher import ViTFeatureExtractor, LLMFeatureExtractor
 from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP
