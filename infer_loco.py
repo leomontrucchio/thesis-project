@@ -4,15 +4,106 @@ import torch
 import torchvision
 from tqdm import tqdm
 import numpy as np
+import pandas as pd
 import tifffile
+import subprocess
+import json
+import glob
+import matplotlib.pyplot as plt
+from PIL import Image
+import pandas as pd
 
 from utils_loco.loader_loco import get_data_loader
-from utils_visa.general_utils import set_seeds
+from utils_loco.general_utils import set_seeds, extract_metrics, siglip_denormalize
 
 from models.teacher import ViTFeatureExtractor, LLMFeatureExtractor
 from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+import os
+import json
+import subprocess
+import pandas as pd
+
+def run_evaluation_pipeline(args):
+    eval_script_path = os.path.join("mvtec_loco_ad_evaluation", "evaluate_experiment.py")
+    quantitative_dir = getattr(args, 'quantitative_folder', './results/loco/quantitatives_loco')
+    os.makedirs(quantitative_dir, exist_ok=True)
+    
+    print(f"\nRunning evaluation for {args.class_name}...")
+    
+    # Run evaluate_experiment.py
+    cmd = [
+        "python3", eval_script_path,
+        "--object_name", args.class_name,
+        "--dataset_base_dir", args.dataset_path,
+        "--anomaly_maps_dir", args.anomaly_maps_dir,
+        "--output_dir", quantitative_dir,
+        "--num_parallel_workers", "10", 
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running evaluation script: {e}")
+        return
+
+    # Parse Results
+    metrics_path = os.path.join(quantitative_dir, "metrics.json")
+    if not os.path.exists(metrics_path):
+        print(f"metrics.json not found at {metrics_path}")
+        return
+
+    with open(metrics_path, 'r') as f:
+        metrics = json.load(f)
+    
+    # Extract for all categories
+    glob_auc, glob_30, glob_10, glob_05, glob_01 = extract_metrics('global', metrics)
+    struct_auc, struct_30, struct_10, struct_05, struct_01 = extract_metrics('structural_anomalies', metrics)
+    logic_auc, logic_30, logic_10, logic_05, logic_01 = extract_metrics('logical_anomalies', metrics)
+
+    # Print
+    print(f"\nResults for {args.class_name}:")
+    header = f"{'Type':<12} | {'I-AUROC':<8} | {'sPRO@30%':<8} | {'sPRO@10%':<8} | {'sPRO@5%':<8} | {'sPRO@1%':<8}"
+    print("-" * len(header))
+    print(header)
+    print("-" * len(header))
+    print(f"{'Global':<12} | {glob_auc:.3f}    | {glob_30:.3f}    | {glob_10:.3f}    | {glob_05:.3f}   | {glob_01:.3f}")
+    print(f"{'Structural':<12} | {struct_auc:.3f}    | {struct_30:.3f}    | {struct_10:.3f}    | {struct_05:.3f}   | {struct_01:.3f}")
+    print(f"{'Logical':<12} | {logic_auc:.3f}    | {logic_30:.3f}    | {logic_10:.3f}    | {logic_05:.3f}   | {logic_01:.3f}")
+    print("-" * len(header))
+
+    # Write Markdown Report
+    result_file_name = f'{quantitative_dir}/{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.md'
+    
+    with open(result_file_name, "w") as f:
+        f.write(f'Metrics for class {args.class_name}\n')
+        f.write(f'Config: {args.epochs_no} epochs, {args.batch_size} batch size\n\n')
+        
+        f.write('| Type       | sPRO@30% | sPRO@10% | sPRO@5%  | sPRO@1%  | I-AUROC  |\n')
+        f.write('| ---------- | -------- | -------- | -------- | -------- | -------- |\n')
+        f.write(f'| Global     | {glob_30:.3f} | {glob_10:.3f} | {glob_05:.3f} | {glob_01:.3f} | {glob_auc:.3f} |\n')
+        f.write(f'| Structural | {struct_30:.3f} | {struct_10:.3f} | {struct_05:.3f} | {struct_01:.3f} | {struct_auc:.3f} |\n')
+        f.write(f'| Logical    | {logic_30:.3f} | {logic_10:.3f} | {logic_05:.3f} | {logic_01:.3f} | {logic_auc:.3f} |\n')
+
+    # Write CSV Report
+    results = {
+        'class_name': [args.class_name],
+        # Global
+        'global_i_auroc': [glob_auc],
+        'global_spro_30': [glob_30], 'global_spro_10': [glob_10], 'global_spro_05': [glob_05], 'global_spro_01': [glob_01],
+        # Structural
+        'struct_i_auroc': [struct_auc],
+        'struct_spro_30': [struct_30], 'struct_spro_10': [struct_10], 'struct_spro_05': [struct_05], 'struct_spro_01': [struct_01],
+        # Logical
+        'logic_i_auroc': [logic_auc],
+        'logic_spro_30': [logic_30], 'logic_spro_10': [logic_10], 'logic_spro_05': [logic_05], 'logic_spro_01': [logic_01],
+    }
+    
+    pd.DataFrame(results).to_csv(result_file_name.replace('md', 'csv'), index=False, sep=',')
+    
+
 
 def infer(args):
     set_seeds()
@@ -187,7 +278,54 @@ def infer(args):
             map_numpy = combined_anomaly_map.to(torch.float32).cpu().detach().numpy()
             tifffile.imwrite(save_path, map_numpy)
 
+            if args.produce_qualitatives:
+                save_qual_path = f'{args.qualitative_folder}/{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs/{parent_dir}'
+                os.makedirs(save_qual_path, exist_ok=True)
+
+                # Load Ground Truth
+                if parent_dir == 'good':
+                    gt_np = np.zeros((original_h, original_w))
+                else:
+                    gt_folder_path = os.path.join(args.dataset_path, args.class_name, 'ground_truth', parent_dir, file_name_no_ext)
+                    gt_files = glob.glob(os.path.join(gt_folder_path, "*.png"))
+                    
+                    
+                    # Combine all channels (Logical OR)
+                    gt_combined = None
+                    for f in gt_files:
+                        mask = np.array(Image.open(f).convert('L'))
+                        mask = (mask > 0).astype(np.float32)
+                        if gt_combined is None:
+                            gt_combined = mask
+                        else:
+                            gt_combined = np.maximum(gt_combined, mask)
+                    gt_np = gt_combined
+
+                # Prepare Plot
+                _, axs = plt.subplots(1, 3, figsize=(7, 3))
+
+                img_vis = siglip_denormalize(tensor_img)
+                img_vis = torch.nn.functional.interpolate(img_vis, size=[max_hw, max_hw], mode='bilinear')
+                img_vis = torchvision.transforms.functional.center_crop(img_vis, [original_h, original_w])
+                
+                axs[0].imshow(img_vis.squeeze().permute(1, 2, 0).to(torch.float32).cpu().detach().numpy())
+                axs[0].set_title('Input Image')
+                axs[1].imshow(gt_np, cmap='gray')
+                axs[1].set_title('Ground-truth')
+                axs[2].imshow(map_numpy, cmap=plt.cm.jet)
+                axs[2].set_title('Anomaly Map')
+
+                for ax in axs.flat:
+                    ax.axis('off')
+
+                plt.tight_layout()
+                plt.savefig(os.path.join(save_qual_path, file_name_no_ext), dpi=256)
+                plt.close()
+
     print("Inference complete. Maps are stored.")
+
+    run_evaluation_pipeline(args)
+
 
 
 if __name__ == '__main__':
@@ -201,6 +339,15 @@ if __name__ == '__main__':
     
     parser.add_argument('--dataset_path', default = './datasets/mvtec_loco', type = str,
                         help = 'Dataset path.')
+    
+    parser.add_argument('--quantitative_folder', default='./results/loco/quantitatives_loco', type=str,
+                        help='Path to the folder in which to save the quantitatives.')
+    
+    parser.add_argument('--qualitative_folder', default='./results/loco/qualitatives_loco', type=str,
+                        help='Path to save qualitatives.')
+    
+    parser.add_argument('--produce_qualitatives', default=True, action='store_true',
+                        help='Whether to produce qualitatives or not.')
     
     parser.add_argument('--class_name', default = "breakfast_box", type = str,
                         help = 'Category name.')
@@ -217,7 +364,7 @@ if __name__ == '__main__':
     parser.add_argument('--students_blocks', type=str, default='Full', choices=['Both ViT', 'Both LLM', 'Full'],
                         help='Inference scenario.')
     
-    parser.add_argument('--label', default=None, type=str,
+    parser.add_argument('--label', default='assistant_inspect_db_LLM_0_1', type=str,
                         help='Experiment label. For experiment involving just ViT students, use the same name of vit_label.')
     
     parser.add_argument('--vit_label', default='l2bt_deepseek_res_new', type=str,
