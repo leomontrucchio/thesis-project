@@ -6,3 +6,5 @@ for class_name in "${class_names[@]}"
     do
         python3 infer_loco.py --class_name $class_name
     done
+
+python3 aggregate_metrics.py
