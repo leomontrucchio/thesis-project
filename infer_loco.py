@@ -11,20 +11,16 @@ import json
 import glob
 import matplotlib.pyplot as plt
 from PIL import Image
-import pandas as pd
 
 from utils_loco.loader_loco import get_data_loader
 from utils_loco.general_utils import set_seeds, extract_metrics, siglip_denormalize
+from utils_loco.config_loco import PROMPTS_CONFIG
 
 from models.teacher import ViTFeatureExtractor, LLMFeatureExtractor
-from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP
+from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP, FeatureProjectionBottleneckMLP
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-import os
-import json
-import subprocess
-import pandas as pd
 
 def run_evaluation_pipeline(args):
     eval_script_path = os.path.join("mvtec_loco_ad_evaluation", "evaluate_experiment.py")
@@ -69,13 +65,13 @@ def run_evaluation_pipeline(args):
     print("-" * len(header))
     print(header)
     print("-" * len(header))
-    print(f"{'Global':<12} | {glob_auc:.3f}    | {glob_30:.3f}    | {glob_10:.3f}    | {glob_05:.3f}   | {glob_01:.3f}")
-    print(f"{'Structural':<12} | {struct_auc:.3f}    | {struct_30:.3f}    | {struct_10:.3f}    | {struct_05:.3f}   | {struct_01:.3f}")
-    print(f"{'Logical':<12} | {logic_auc:.3f}    | {logic_30:.3f}    | {logic_10:.3f}    | {logic_05:.3f}   | {logic_01:.3f}")
+    print(f"{'Global':<12} | {glob_auc:.3f}    | {glob_30:.3f}    | {glob_10:.3f}    | {glob_05:.3f}    | {glob_01:.3f}")
+    print(f"{'Structural':<12} | {struct_auc:.3f}    | {struct_30:.3f}    | {struct_10:.3f}    | {struct_05:.3f}    | {struct_01:.3f}")
+    print(f"{'Logical':<12} | {logic_auc:.3f}    | {logic_30:.3f}    | {logic_10:.3f}    | {logic_05:.3f}    | {logic_01:.3f}")
     print("-" * len(header))
 
     # Write Markdown Report
-    result_file_name = f'{quantitative_dir}/{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.md'
+    result_file_name = f'{quantitative_dir}/{args.students_blocks}_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.md'
     
     with open(result_file_name, "w") as f:
         f.write(f'Metrics for class {args.class_name}\n')
@@ -109,7 +105,7 @@ def infer(args):
     set_seeds()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    dtype = torch.float32 if args.students_blocks == 'Both ViT' else torch.bfloat16
+    dtype = torch.float32 if args.students_blocks == 'Both_ViT' else torch.bfloat16
 
     vit_label = args.vit_label
     llm_label = args.label
@@ -125,12 +121,12 @@ def infer(args):
     teachers = {}
     check_dir = f'{args.checkpoint_folder}/{args.class_name}'
 
-    if args.students_blocks == 'Both ViT':
+    if args.students_blocks == 'Both_ViT':
         # --- ViT Bidirectional ---
         teachers['fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device).eval()
         
-        students['backward_net'] = ResidualFeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=1).to(device)
-        students['forward_net'] = ResidualFeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=1).to(device)
+        students['backward_net'] = FeatureProjectionBottleneckMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.5).to(device)
+        students['forward_net'] = FeatureProjectionBottleneckMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.5).to(device)
 
         fwd_path = os.path.join(check_dir, f'forward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
         bwd_path = os.path.join(check_dir, f'backward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
@@ -138,9 +134,12 @@ def infer(args):
         students['forward_net'].load_state_dict(torch.load(fwd_path, map_location=device, weights_only=False))
         students['backward_net'].load_state_dict(torch.load(bwd_path, map_location=device, weights_only=False))
 
-    elif args.students_blocks == 'Both LLM':
+    elif args.students_blocks == 'Both_LLM':
         # --- LLM Bidirectional ---
-        teachers['fe'] = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
+        if args.class_name not in PROMPTS_CONFIG:
+            raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
+        teachers['fe'] = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[args.class_name],
+                                             layer1_idx=0, layer2_idx=1).to(device).eval()
         
         students['backward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device=device, dtype=dtype)
         students['forward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device=device, dtype=dtype)
@@ -154,7 +153,10 @@ def infer(args):
     elif args.students_blocks == 'Full':
         # --- ViT Bidirectional + LLM Bidirectional ---
         teachers['vit_fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device, dtype=dtype).eval()
-        teachers['llm_fe'] = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
+        if args.class_name not in PROMPTS_CONFIG:
+            raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
+        teachers['llm_fe'] = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[args.class_name],
+                                                 layer1_idx=0, layer2_idx=1).to(device).eval()
 
         # ViT Students (Residual)
         students['vit_fw'] = ResidualFeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
@@ -201,7 +203,7 @@ def infer(args):
             # Feature Extraction & Prediction & Map Calculation
             combined_anomaly_map = None
 
-            if args.students_blocks == 'Both ViT':
+            if args.students_blocks == 'Both_ViT':
                 # Extraction
                 first_patch, second_patch = teachers['fe'](tensor_img)
                 # Prediction
@@ -213,7 +215,7 @@ def infer(args):
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, args.img_size // teachers['fe'].patch_size, args.img_size // teachers['fe'].patch_size)
 
-            elif args.students_blocks == 'Both LLM':
+            elif args.students_blocks == 'Both_LLM':
                 # Extraction
                 first_patch, second_patch = teachers['fe'](pil_img)
                 # Prediction
@@ -279,7 +281,7 @@ def infer(args):
             tifffile.imwrite(save_path, map_numpy)
 
             if args.produce_qualitatives:
-                save_qual_path = f'{args.qualitative_folder}/{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs/{parent_dir}'
+                save_qual_path = f'{args.qualitative_folder}/{args.students_blocks}_{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs/{parent_dir}'
                 os.makedirs(save_qual_path, exist_ok=True)
 
                 # Load Ground Truth
@@ -361,13 +363,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--students_blocks', type=str, default='Both ViT', choices=['Both ViT', 'Both LLM', 'Full'],
+    parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'Both_LLM', 'Full'],
                         help='Inference scenario.')
     
-    parser.add_argument('--label', default='vit_res_1', type=str,
+    parser.add_argument('--label', default='vit_bottl_0.5', type=str,
                         help='Experiment label. For experiment involving just ViT students, use the same name of vit_label.')
     
-    parser.add_argument('--vit_label', default='vit_res_1', type=str,
+    parser.add_argument('--vit_label', default='vit_bottl_0.5', type=str,
                         help='Label of experiment involving just ViT students.')
 
     args = parser.parse_args()

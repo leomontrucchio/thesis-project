@@ -26,8 +26,8 @@ class LLMFeatureExtractor(torch.nn.Module):
 
         # prompt_text = "<|grounding|>This image shows industrial products in perfect condition that meet all quality standards."
         # self.conversation_template = [
-        #   {"role": "<|User|>", "content": f"<image>\n{prompt_text}"},
-        #   {"role": "<|Assistant|>", "content": ""}
+        #    {"role": "<|User|>", "content": f"<image>\n{prompt_text}"},
+        #    {"role": "<|Assistant|>", "content": ""}
         # ]
         self.conversation_template = [
             {

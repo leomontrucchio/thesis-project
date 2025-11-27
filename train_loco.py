@@ -7,18 +7,19 @@ from tqdm import tqdm, trange
 
 from utils_loco.loader_loco import get_data_loader 
 from utils_loco.general_utils import set_seeds
+from utils_loco.config_loco import PROMPTS_CONFIG
 
 from models.teacher import ViTFeatureExtractor, LLMFeatureExtractor
-from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP
+from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP, FeatureProjectionBottleneckMLP
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 def train(args):
     set_seeds()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    dtype = torch.float32 if args.students_blocks == 'Both ViT' else torch.bfloat16
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = torch.float32 if args.students_blocks == 'Both_ViT' else torch.bfloat16
 
     model_name = f'{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs'
 
@@ -45,25 +46,28 @@ def train(args):
     students = {}
     teacher = None
 
-    if args.students_blocks == 'Both ViT':
+    if args.students_blocks == 'Both_ViT':
         # --- ViT Bidirectional, Residual MLP ---
         
         # Teacher
         teacher = ViTFeatureExtractor(layers=[1, 5]).to(device).eval()
         
         # Students (Residual Architecture)
-        students['backward_net'] = ResidualFeatureProjectionMLP(
-            in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=1
+        students['backward_net'] = FeatureProjectionMLP(
+            in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=0.4
         ).to(device)
-        students['forward_net'] = ResidualFeatureProjectionMLP(
-            in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=1
+        students['forward_net'] = FeatureProjectionMLP(
+            in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=0.4
         ).to(device)
 
-    elif args.students_blocks == 'Both LLM':
+    elif args.students_blocks == 'Both_LLM':
         # --- LLM Bidirectional, Standard MLP ---
-        
+
         # Teacher
-        teacher = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
+        if args.class_name not in PROMPTS_CONFIG:
+            raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
+        teacher = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[args.class_name],
+                                      layer1_idx=0, layer2_idx=1).to(device).eval()
         
         # Students (Standard Architecture)
         students['backward_net'] = FeatureProjectionMLP(
@@ -94,7 +98,7 @@ def train(args):
         for pil_img, tensor_img in tqdm(train_loader, desc=f'    Epoch {epoch+1} [Train]'):
             
             # Prepare Input
-            if args.students_blocks == 'Both ViT':
+            if args.students_blocks == 'Both_ViT':
                 input_data = tensor_img.to(device)
             else:
                 input_data = pil_img
@@ -138,7 +142,7 @@ def train(args):
             for pil_img, tensor_img in tqdm(val_loader, desc=f'    Epoch {epoch+1} [Val]'):
                 
                 # Prepare Input
-                if args.students_blocks == 'Both ViT':
+                if args.students_blocks == 'Both_ViT':
                     input_data = tensor_img.to(device)
                 else:
                     input_data = pil_img
@@ -191,10 +195,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
     
-    parser.add_argument('--students_blocks', type=str, default='Both ViT', choices=['Both ViT', 'Both LLM'],
+    parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'Both_LLM'],
                         help='Training scenario: where the 2 students extract features from')
     
-    parser.add_argument('--label', default='unified_loco_exp', type=str,
+    parser.add_argument('--label', default='vit_norm_0.4', type=str,
                         help='Label to identify the experiment.')
 
     args = parser.parse_args()
