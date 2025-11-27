@@ -147,9 +147,9 @@ def infer(args):
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = (torch.nn.functional.normalize(pred_1st_patch, dim=-1) - torch.nn.functional.normalize(first_patch, dim=-1)).pow(2).sum(-1).sqrt()
-                second_map = (torch.nn.functional.normalize(pred_2nd_patch, dim=-1) - torch.nn.functional.normalize(second_patch, dim=-1)).pow(2).sum(-1).sqrt()
-                
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
+
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, args.img_size // teachers['fe'].patch_size, args.img_size // teachers['fe'].patch_size)
 
             elif args.students_blocks == 'ViT-LLM':
@@ -160,8 +160,8 @@ def infer(args):
                 pred_vit = students['vit_net'](vit_1st)
                 pred_llm = students['llm_net'](llm_1st)
                 # Map Calc
-                vit_map = (torch.nn.functional.normalize(pred_vit, dim=-1) - torch.nn.functional.normalize(vit_2nd, dim=-1)).pow(2).sum(-1).sqrt()
-                llm_map = (torch.nn.functional.normalize(pred_llm, dim=-1) - torch.nn.functional.normalize(llm_2nd, dim=-1)).pow(2).sum(-1).sqrt()
+                vit_map = 1 - torch.nn.functional.cosine_similarity(pred_vit, vit_2nd, dim=-1)
+                llm_map = 1 - torch.nn.functional.cosine_similarity(pred_llm, llm_2nd, dim=-1)
                 
                 vit_reshaped = vit_map.reshape(1, 1, 27, 27)
                 llm_reshaped = llm_map.reshape(1, 1, 14, 14)
@@ -176,8 +176,8 @@ def infer(args):
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = (torch.nn.functional.normalize(pred_1st_patch, dim=-1) - torch.nn.functional.normalize(first_patch, dim=-1)).pow(2).sum(-1).sqrt()
-                second_map = (torch.nn.functional.normalize(pred_2nd_patch, dim=-1) - torch.nn.functional.normalize(second_patch, dim=-1)).pow(2).sum(-1).sqrt()
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, 14, 14)
 
@@ -193,10 +193,10 @@ def infer(args):
                 pred_llm_1st = students['llm_bw'](llm_2nd)
 
                 # Map Calc
-                vit_fw_map = (torch.nn.functional.normalize(pred_vit_2nd, dim=-1) - torch.nn.functional.normalize(vit_2nd, dim=-1)).pow(2).sum(-1).sqrt()
-                vit_bw_map = (torch.nn.functional.normalize(pred_vit_1st, dim=-1) - torch.nn.functional.normalize(vit_1st, dim=-1)).pow(2).sum(-1).sqrt()
-                llm_fw_map = (torch.nn.functional.normalize(pred_llm_2nd, dim=-1) - torch.nn.functional.normalize(llm_2nd, dim=-1)).pow(2).sum(-1).sqrt()
-                llm_bw_map = (torch.nn.functional.normalize(pred_llm_1st, dim=-1) - torch.nn.functional.normalize(llm_1st, dim=-1)).pow(2).sum(-1).sqrt()
+                vit_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_2nd, vit_2nd, dim=-1)
+                vit_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_1st, vit_1st, dim=-1)
+                llm_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_2nd, llm_2nd, dim=-1)
+                llm_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_1st, llm_1st, dim=-1)
 
                 vit_comb = (vit_fw_map.reshape(1, 1, 27, 27) * vit_bw_map.reshape(1, 1, 27, 27))
                 

@@ -208,8 +208,8 @@ def infer(args):
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = (torch.nn.functional.normalize(pred_1st_patch, dim=-1) - torch.nn.functional.normalize(first_patch, dim=-1)).pow(2).sum(-1).sqrt()
-                second_map = (torch.nn.functional.normalize(pred_2nd_patch, dim=-1) - torch.nn.functional.normalize(second_patch, dim=-1)).pow(2).sum(-1).sqrt()
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, args.img_size // teachers['fe'].patch_size, args.img_size // teachers['fe'].patch_size)
 
@@ -220,8 +220,8 @@ def infer(args):
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = (torch.nn.functional.normalize(pred_1st_patch, dim=-1) - torch.nn.functional.normalize(first_patch, dim=-1)).pow(2).sum(-1).sqrt()
-                second_map = (torch.nn.functional.normalize(pred_2nd_patch, dim=-1) - torch.nn.functional.normalize(second_patch, dim=-1)).pow(2).sum(-1).sqrt()
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, 14, 14)
 
@@ -237,10 +237,10 @@ def infer(args):
                 pred_llm_1st = students['llm_bw'](llm_2nd)
 
                 # Map Calc
-                vit_fw_map = (torch.nn.functional.normalize(pred_vit_2nd, dim=-1) - torch.nn.functional.normalize(vit_2nd, dim=-1)).pow(2).sum(-1).sqrt()
-                vit_bw_map = (torch.nn.functional.normalize(pred_vit_1st, dim=-1) - torch.nn.functional.normalize(vit_1st, dim=-1)).pow(2).sum(-1).sqrt()
-                llm_fw_map = (torch.nn.functional.normalize(pred_llm_2nd, dim=-1) - torch.nn.functional.normalize(llm_2nd, dim=-1)).pow(2).sum(-1).sqrt()
-                llm_bw_map = (torch.nn.functional.normalize(pred_llm_1st, dim=-1) - torch.nn.functional.normalize(llm_1st, dim=-1)).pow(2).sum(-1).sqrt()
+                vit_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_2nd, vit_2nd, dim=-1)
+                vit_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_1st, vit_1st, dim=-1)
+                llm_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_2nd, llm_2nd, dim=-1)
+                llm_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_1st, llm_1st, dim=-1)
 
                 vit_comb = (vit_fw_map.reshape(1, 1, 27, 27) * vit_bw_map.reshape(1, 1, 27, 27))
                 
@@ -361,13 +361,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--students_blocks', type=str, default='Full', choices=['Both ViT', 'Both LLM', 'Full'],
+    parser.add_argument('--students_blocks', type=str, default='Both ViT', choices=['Both ViT', 'Both LLM', 'Full'],
                         help='Inference scenario.')
     
-    parser.add_argument('--label', default='assistant_inspect_db_LLM_0_1', type=str,
+    parser.add_argument('--label', default='vit_res_1', type=str,
                         help='Experiment label. For experiment involving just ViT students, use the same name of vit_label.')
     
-    parser.add_argument('--vit_label', default='l2bt_deepseek_res_new', type=str,
+    parser.add_argument('--vit_label', default='vit_res_1', type=str,
                         help='Label of experiment involving just ViT students.')
 
     args = parser.parse_args()
