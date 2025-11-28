@@ -20,8 +20,7 @@ def aggregate_results(args):
     missing_classes = []
 
     for class_name in LOCO_CLASSES:
-
-        filename = f"{args.label}_{class_name}_{args.epochs_no}ep_{args.batch_size}bs.csv"
+        filename = f"{args.students_blocks}_{args.label}_{class_name}_{args.epochs_no}ep_{args.batch_size}bs.csv"
         filepath = os.path.join(args.quantitative_folder, filename)
 
         if os.path.exists(filepath):
@@ -110,8 +109,11 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=4, type=int,
                         help='Batch size used in the experiment filename.')
     
-    parser.add_argument('--label', default='vit_res_1', type=str,
-                        help='The experiment label used during inference (e.g. "vit_res_1").')
+    parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'Both_LLM', 'Full'],
+                        help='Inference scenario.')
+    
+    parser.add_argument('--label', default='vit_norm_0.4', type=str,
+                        help='The experiment label used during inference.')
 
     args = parser.parse_args()
     aggregate_results(args)
