@@ -4,7 +4,6 @@ from PIL import Image, ImageOps
 from torchvision import transforms
 import glob
 from torch.utils.data import Dataset, DataLoader
-from utils_visa.general_utils import SquarePad
 
 
 class DeepSeekPad:
