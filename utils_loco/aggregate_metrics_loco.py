@@ -17,8 +17,6 @@ def aggregate_results(args):
         return
 
     dfs = []
-    missing_classes = []
-
     for class_name in LOCO_CLASSES:
         filename = f"{args.students_blocks}_{args.label}_{class_name}_{args.epochs_no}ep_{args.batch_size}bs.csv"
         filepath = os.path.join(args.quantitative_folder, filename)
@@ -30,7 +28,6 @@ def aggregate_results(args):
             except Exception as e:
                 print(f"Error reading {filename}: {e}")
         else:
-            missing_classes.append(class_name)
             print(f"Warning: Result file for '{class_name}' not found ({filename})")
 
     if not dfs:
@@ -112,7 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'Both_LLM', 'Full'],
                         help='Inference scenario.')
     
-    parser.add_argument('--label', default='vit_norm_0.4', type=str,
+    parser.add_argument('--label', default='hd_norm_11_15_0.3', type=str,
                         help='The experiment label used during inference.')
 
     args = parser.parse_args()
