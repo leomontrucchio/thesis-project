@@ -18,11 +18,22 @@ from models.student import ResidualFeatureProjectionMLP, FeatureProjectionMLP
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+conversation_template = [
+            {
+                "role": "<|User|>",
+                "content": "<|grounding|><image>\nInspect <|ref|>this industrial components<|/ref|> and verify that they meet all quality standards."
+            },
+            {
+                "role": "<|Assistant|>",
+                "content": "Inspection complete. The components meet all quality standards and are free from any imperfections.",
+            },
+        ]
+
 def infer(args):
     set_seeds()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    dtype = torch.float32 if args.students_blocks == 'Both ViT' else torch.bfloat16
+    dtype = torch.bfloat16
 
     vit_label = args.vit_label
     llm_label = args.label
@@ -39,12 +50,12 @@ def infer(args):
 
     check_dir = f'{args.checkpoint_folder}/{args.class_name}'
     
-    if args.students_blocks == 'Both ViT':
+    if args.students_blocks == 'Both_ViT':
         # --- ViT Bidirectional ---
-        teachers['fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device).eval()
+        teachers['fe'] = ViTFeatureExtractor(layers=[15, 19]).to(device, dtype=dtype).eval()
         
-        students['backward_net'] = ResidualFeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device)
-        students['forward_net'] = ResidualFeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device)
+        students['backward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device, dtype=dtype)
+        students['forward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device, dtype=dtype)
 
         # Load Checkpoints
         fwd_path = os.path.join(check_dir, f'forward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
@@ -68,7 +79,7 @@ def infer(args):
         students['vit_net'].load_state_dict(torch.load(vit_path, map_location=device, weights_only=False))
         students['llm_net'].load_state_dict(torch.load(llm_path, map_location=device, weights_only=False))
 
-    elif args.students_blocks == 'Both LLM':
+    elif args.students_blocks == 'Both_LLM':
         # --- LLM Bidirectional ---
         teachers['fe'] = LLMFeatureExtractor(layer1_idx=0, layer2_idx=1).to(device).eval()
         
@@ -84,12 +95,12 @@ def infer(args):
 
     elif args.students_blocks == 'Full':
         # --- ViT Bidirectional + LLM Bidirectional ---
-        teachers['vit_fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device, dtype=dtype).eval()
-        teachers['llm_fe'] = LLMFeatureExtractor(layer1_idx=0, layer2_idx=2).to(device).eval()
+        teachers['vit_fe'] = ViTFeatureExtractor(layers=[15, 19]).to(device, dtype=dtype).eval()
+        teachers['llm_fe'] = LLMFeatureExtractor(conversation_template=conversation_template, layer1_idx=0, layer2_idx=1).to(device).eval()
 
         # ViT Students (Residual)
-        students['vit_fw'] = ResidualFeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
-        students['vit_bw'] = ResidualFeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
+        students['vit_fw'] = FeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
+        students['vit_bw'] = FeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
         
         # LLM Students (Standard)
         students['llm_fw'] = FeatureProjectionMLP(in_features=teachers['llm_fe'].embed_dim, out_features=teachers['llm_fe'].embed_dim).to(device=device, dtype=dtype)
@@ -116,8 +127,8 @@ def infer(args):
     # Gaussian Blur Setup
     w_l, w_u = 5, 7
     pad_l, pad_u = 2, 3
-    weight_l = torch.ones(1, 1, w_l, w_l, device=device, dtype=dtype)/(w_l**2)
-    weight_u = torch.ones(1, 1, w_u, w_u, device=device, dtype=dtype)/(w_u**2)
+    weight_l = torch.ones(1, 1, w_l, w_l, device=device)/(w_l**2)
+    weight_u = torch.ones(1, 1, w_u, w_u, device=device)/(w_u**2)
 
     # Initialize Lists
     predictions, gts = [], []
@@ -140,15 +151,15 @@ def infer(args):
             start_event.record()
 
             # Feature Extraction & Prediction & Map Calculation
-            if args.students_blocks == 'Both ViT':
+            if args.students_blocks == 'Both_ViT':
                 # Extraction
                 first_patch, second_patch = teachers['fe'](tensor_img)
                 # Prediction
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
-                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch.float(), first_patch.float(), dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch.float(), second_patch.float(), dim=-1)
 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, args.img_size // teachers['fe'].patch_size, args.img_size // teachers['fe'].patch_size)
 
@@ -160,8 +171,8 @@ def infer(args):
                 pred_vit = students['vit_net'](vit_1st)
                 pred_llm = students['llm_net'](llm_1st)
                 # Map Calc
-                vit_map = 1 - torch.nn.functional.cosine_similarity(pred_vit, vit_2nd, dim=-1)
-                llm_map = 1 - torch.nn.functional.cosine_similarity(pred_llm, llm_2nd, dim=-1)
+                vit_map = 1 - torch.nn.functional.cosine_similarity(pred_vit.float(), vit_2nd.float(), dim=-1)
+                llm_map = 1 - torch.nn.functional.cosine_similarity(pred_llm.float(), llm_2nd.float(), dim=-1)
                 
                 vit_reshaped = vit_map.reshape(1, 1, 27, 27)
                 llm_reshaped = llm_map.reshape(1, 1, 14, 14)
@@ -169,15 +180,15 @@ def infer(args):
                 
                 combined_anomaly_map = vit_reshaped * llm_resized
 
-            elif args.students_blocks == 'Both LLM':
+            elif args.students_blocks == 'Both_LLM':
                 # Extraction
                 first_patch, second_patch = teachers['fe'](pil_img)
                 # Prediction
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
-                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch.float(), first_patch.float(), dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch.float(), second_patch.float(), dim=-1)
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, 14, 14)
 
@@ -193,10 +204,10 @@ def infer(args):
                 pred_llm_1st = students['llm_bw'](llm_2nd)
 
                 # Map Calc
-                vit_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_2nd, vit_2nd, dim=-1)
-                vit_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_1st, vit_1st, dim=-1)
-                llm_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_2nd, llm_2nd, dim=-1)
-                llm_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_1st, llm_1st, dim=-1)
+                vit_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_2nd.float(), vit_2nd.float(), dim=-1)
+                vit_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_1st.float(), vit_1st.float(), dim=-1)
+                llm_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_2nd.float(), llm_2nd.float(), dim=-1)
+                llm_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_1st.float(), llm_1st.float(), dim=-1)
 
                 vit_comb = (vit_fw_map.reshape(1, 1, 27, 27) * vit_bw_map.reshape(1, 1, 27, 27))
                 
@@ -346,13 +357,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--students_blocks', type=str, default='Full', choices=['Both ViT', 'ViT-LLM', 'Both LLM', 'Full'],
+    parser.add_argument('--students_blocks', type=str, default='Full', choices=['Both_ViT', 'ViT-LLM', 'Both_LLM', 'Full'],
                         help='Inference scenario.')
     
-    parser.add_argument('--label', default='ground_db_LLM_0_2', type=str,
+    parser.add_argument('--label', default='assistant_inspect_db_LLM_0_1', type=str,
                         help='Experiment label. For experiment involving just ViT students, use the same name of vit_label.')
     
-    parser.add_argument('--vit_label', default='l2bt_deepseek_res', type=str, 
+    parser.add_argument('--vit_label', default='final_vit', type=str, 
                         help='Label of experiment involving just ViT students.')
 
     args = parser.parse_args()

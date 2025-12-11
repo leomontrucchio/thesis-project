@@ -24,7 +24,7 @@ def train(args):
     set_seeds()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    dtype = torch.float32 if args.students_blocks == 'Both ViT' else torch.bfloat16
+    dtype = torch.float32 if args.students_blocks == 'Both_ViT' else torch.bfloat16
 
     # Construct run name
     model_name = f'{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs'
@@ -48,19 +48,19 @@ def train(args):
     
     optimizer_params = []
 
-    if args.students_blocks == 'Both ViT':
+    if args.students_blocks == 'Both_ViT':
         # --- ViT Bidirectional, Residual MLP ---
         
         # Teacher
-        teachers['fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device).eval()
+        teachers['fe'] = ViTFeatureExtractor(layers=[15, 19]).to(device).eval()
         
         # Students
-        students['backward_net'] = ResidualFeatureProjectionMLP(
+        students['backward_net'] = FeatureProjectionMLP(
             in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=1
-        ).to(device)
-        students['forward_net'] = ResidualFeatureProjectionMLP(
+        ).to(device=device, dtype=dtype)
+        students['forward_net'] = FeatureProjectionMLP(
             in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=1
-        ).to(device)
+        ).to(device=device, dtype=dtype)
 
     elif args.students_blocks == 'ViT-LLM':
         # --- ViT & LLM forward, Standard MLP ---
@@ -80,7 +80,7 @@ def train(args):
             act_layer=torch.nn.SiLU
         ).to(device=device, dtype=dtype)
 
-    elif args.students_blocks == 'Both LLM':
+    elif args.students_blocks == 'Both_LLM':
         # --- LLM Bidirectional, Standard MLP ---
         
         # Teacher
@@ -116,16 +116,22 @@ def train(args):
 
             # Feature extraction.
             with torch.no_grad():
-                if args.students_blocks == 'Both ViT':
+                if args.students_blocks == 'Both_ViT':
                     earlier_patch, later_patch = teachers['fe'](tensor_img)
+                    earlier_patch = earlier_patch.to(dtype=dtype)
+                    later_patch = later_patch.to(dtype=dtype)
                 elif args.students_blocks == 'ViT-LLM':
                     vit_1st, vit_2nd = teachers['vit_fe'](tensor_img)
                     llm_1st, llm_2nd = teachers['llm_fe'](pil_img)
-                elif args.students_blocks == 'Both LLM':
+                    vit_1st = vit_1st.to(dtype=dtype)
+                    vit_2nd = vit_2nd.to(dtype=dtype)
+                    llm_1st = llm_1st.to(dtype=dtype)
+                    llm_2nd = llm_2nd.to(dtype=dtype)
+                elif args.students_blocks == 'Both_LLM':
                     earlier_patch, later_patch = teachers['fe'](pil_img)
 
             # Nets prediction and losses.
-            if args.students_blocks in ['Both ViT', 'Both LLM']:
+            if args.students_blocks in ['Both_ViT', 'Both_LLM']:
                 # Bidirectional logic (Forward + Backward)
                 pred_later = students['forward_net'](earlier_patch)
                 pred_earlier = students['backward_net'](later_patch)
@@ -193,10 +199,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
     
-    parser.add_argument('--students_blocks', type=str, default='Both ViT', choices=['Both ViT', 'ViT-LLM', 'Both LLM'],
+    parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'ViT-LLM', 'Both_LLM'],
                         help='Where the 2 students extract features from')
     
-    parser.add_argument('--label', default = 'assistant_from_deepseek_MLLM', type = str, 
+    parser.add_argument('--label', default = 'final_vit', type = str, 
                         help = 'Label to identify the experiment.')
 
     args = parser.parse_args()
