@@ -105,7 +105,7 @@ def infer(args):
     set_seeds()
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    dtype = torch.float32 if args.students_blocks == 'Both_ViT' else torch.bfloat16
+    dtype = torch.bfloat16
 
     vit_label = args.vit_label
     llm_label = args.label
@@ -123,10 +123,10 @@ def infer(args):
 
     if args.students_blocks == 'Both_ViT':
         # --- ViT Bidirectional ---
-        teachers['fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device).eval()
+        teachers['fe'] = ViTFeatureExtractor(layers=[1, 2]).to(device, dtype=dtype).eval()
         
-        students['backward_net'] = FeatureProjectionBottleneckMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.5).to(device)
-        students['forward_net'] = FeatureProjectionBottleneckMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.5).to(device)
+        students['backward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.4).to(device, dtype=dtype)
+        students['forward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.4).to(device, dtype=dtype)
 
         fwd_path = os.path.join(check_dir, f'forward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
         bwd_path = os.path.join(check_dir, f'backward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
@@ -136,13 +136,13 @@ def infer(args):
 
     elif args.students_blocks == 'Both_LLM':
         # --- LLM Bidirectional ---
-        if args.class_name not in PROMPTS_CONFIG:
-            raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
-        teachers['fe'] = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[args.class_name],
-                                             layer1_idx=0, layer2_idx=1).to(device).eval()
+        # if f'grounding_s_{args.class_name}' not in PROMPTS_CONFIG:
+        #     raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
+        teachers['fe'] = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG['generic'],
+                                             layer1_idx=2, layer2_idx=3).to(device).eval()
         
-        students['backward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device=device, dtype=dtype)
-        students['forward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim).to(device=device, dtype=dtype)
+        students['backward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.4).to(device=device, dtype=dtype)
+        students['forward_net'] = FeatureProjectionMLP(in_features=teachers['fe'].embed_dim, out_features=teachers['fe'].embed_dim, reduction_factor=0.4).to(device=device, dtype=dtype)
 
         fwd_path = os.path.join(check_dir, f'forward_net_{llm_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
         bwd_path = os.path.join(check_dir, f'backward_net_{llm_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
@@ -152,19 +152,19 @@ def infer(args):
 
     elif args.students_blocks == 'Full':
         # --- ViT Bidirectional + LLM Bidirectional ---
-        teachers['vit_fe'] = ViTFeatureExtractor(layers=[1, 5]).to(device, dtype=dtype).eval()
-        if args.class_name not in PROMPTS_CONFIG:
-            raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
-        teachers['llm_fe'] = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[args.class_name],
+        teachers['vit_fe'] = ViTFeatureExtractor(layers=[11, 15]).to(device, dtype=dtype).eval()
+        # if args.class_name not in PROMPTS_CONFIG:
+        #     raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
+        teachers['llm_fe'] = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG['generic'],
                                                  layer1_idx=0, layer2_idx=1).to(device).eval()
 
         # ViT Students (Residual)
-        students['vit_fw'] = ResidualFeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
-        students['vit_bw'] = ResidualFeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=1).to(device=device, dtype=dtype)
+        students['vit_fw'] = FeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=0.4).to(device=device, dtype=dtype)
+        students['vit_bw'] = FeatureProjectionMLP(in_features=teachers['vit_fe'].embed_dim, out_features=teachers['vit_fe'].embed_dim, reduction_factor=0.4).to(device=device, dtype=dtype)
         
         # LLM Students (Standard)
-        students['llm_fw'] = FeatureProjectionMLP(in_features=teachers['llm_fe'].embed_dim, out_features=teachers['llm_fe'].embed_dim).to(device=device, dtype=dtype)
-        students['llm_bw'] = FeatureProjectionMLP(in_features=teachers['llm_fe'].embed_dim, out_features=teachers['llm_fe'].embed_dim).to(device=device, dtype=dtype)
+        students['llm_fw'] = FeatureProjectionMLP(in_features=teachers['llm_fe'].embed_dim, out_features=teachers['llm_fe'].embed_dim, reduction_factor=0.4).to(device=device, dtype=dtype)
+        students['llm_bw'] = FeatureProjectionMLP(in_features=teachers['llm_fe'].embed_dim, out_features=teachers['llm_fe'].embed_dim, reduction_factor=0.4).to(device=device, dtype=dtype)
 
         vit_fw_path = os.path.join(check_dir, f'forward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
         vit_bw_path = os.path.join(check_dir, f'backward_net_{vit_label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs.pth')
@@ -186,8 +186,8 @@ def infer(args):
     # Gaussian Blur Setup
     w_l, w_u = 5, 7
     pad_l, pad_u = 2, 3
-    weight_l = torch.ones(1, 1, w_l, w_l, device=device, dtype=dtype)/(w_l**2)
-    weight_u = torch.ones(1, 1, w_u, w_u, device=device, dtype=dtype)/(w_u**2)
+    weight_l = torch.ones(1, 1, w_l, w_l, device=device)/(w_l**2)
+    weight_u = torch.ones(1, 1, w_u, w_u, device=device)/(w_u**2)
 
     # Base folder to store anomaly maps
     base_output_dir = os.path.join(args.anomaly_maps_dir, args.class_name, 'test')
@@ -210,8 +210,8 @@ def infer(args):
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
-                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch.float(), first_patch.float(), dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch.float(), second_patch.float(), dim=-1)
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, args.img_size // teachers['fe'].patch_size, args.img_size // teachers['fe'].patch_size)
 
@@ -222,8 +222,8 @@ def infer(args):
                 pred_1st_patch = students['backward_net'](second_patch)
                 pred_2nd_patch = students['forward_net'](first_patch)
                 # Map Calc
-                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch, first_patch, dim=-1)
-                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch, second_patch, dim=-1)
+                first_map = 1 - torch.nn.functional.cosine_similarity(pred_1st_patch.float(), first_patch.float(), dim=-1)
+                second_map = 1 - torch.nn.functional.cosine_similarity(pred_2nd_patch.float(), second_patch.float(), dim=-1)
                 
                 combined_anomaly_map = (first_map * second_map).reshape(1, 1, 14, 14)
 
@@ -231,18 +231,16 @@ def infer(args):
                 # Extraction
                 vit_1st, vit_2nd = teachers['vit_fe'](tensor_img)
                 llm_1st, llm_2nd = teachers['llm_fe'](pil_img)
-                
                 # Prediction
                 pred_vit_2nd = students['vit_fw'](vit_1st)
                 pred_vit_1st = students['vit_bw'](vit_2nd)
                 pred_llm_2nd = students['llm_fw'](llm_1st)
                 pred_llm_1st = students['llm_bw'](llm_2nd)
-
                 # Map Calc
-                vit_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_2nd, vit_2nd, dim=-1)
-                vit_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_1st, vit_1st, dim=-1)
-                llm_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_2nd, llm_2nd, dim=-1)
-                llm_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_1st, llm_1st, dim=-1)
+                vit_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_2nd.float(), vit_2nd.float(), dim=-1)
+                vit_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_vit_1st.float(), vit_1st.float(), dim=-1)
+                llm_fw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_2nd.float(), llm_2nd.float(), dim=-1)
+                llm_bw_map = 1 - torch.nn.functional.cosine_similarity(pred_llm_1st.float(), llm_1st.float(), dim=-1)
 
                 vit_comb = (vit_fw_map.reshape(1, 1, 27, 27) * vit_bw_map.reshape(1, 1, 27, 27))
                 
@@ -250,7 +248,7 @@ def infer(args):
                 llm_bw_res = torch.nn.functional.interpolate(llm_bw_map.reshape(1, 1, 14, 14), size=(27, 27), mode='bilinear', align_corners=False)
                 llm_comb = llm_fw_res * llm_bw_res
                 
-                combined_anomaly_map = vit_comb * llm_comb
+                combined_anomaly_map = vit_comb + llm_comb
 
             # Upsample to original resolution
             combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size=[max_hw, max_hw], mode='bilinear')
@@ -291,7 +289,6 @@ def infer(args):
                     gt_folder_path = os.path.join(args.dataset_path, args.class_name, 'ground_truth', parent_dir, file_name_no_ext)
                     gt_files = glob.glob(os.path.join(gt_folder_path, "*.png"))
                     
-                    
                     # Combine all channels (Logical OR)
                     gt_combined = None
                     for f in gt_files:
@@ -317,15 +314,12 @@ def infer(args):
                 axs[2].imshow(map_numpy, cmap=plt.cm.jet)
                 axs[2].set_title('Anomaly Map')
 
-                for ax in axs.flat:
-                    ax.axis('off')
-
+                for ax in axs.flat: ax.axis('off')
                 plt.tight_layout()
                 plt.savefig(os.path.join(save_qual_path, file_name_no_ext), dpi=256)
                 plt.close()
 
     print("Inference complete. Maps are stored.")
-
     run_evaluation_pipeline(args)
 
 
@@ -363,13 +357,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
 
-    parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'Both_LLM', 'Full'],
+    parser.add_argument('--students_blocks', type=str, default='Full', choices=['Both_ViT', 'Both_LLM', 'Full'],
                         help='Inference scenario.')
     
-    parser.add_argument('--label', default='vit_bottl_0.5', type=str,
+    parser.add_argument('--label', default='llm_generic_0.4', type=str,
                         help='Experiment label. For experiment involving just ViT students, use the same name of vit_label.')
     
-    parser.add_argument('--vit_label', default='vit_bottl_0.5', type=str,
+    parser.add_argument('--vit_label', default='norm_11_15', type=str,
                         help='Label of experiment involving just ViT students.')
 
     args = parser.parse_args()

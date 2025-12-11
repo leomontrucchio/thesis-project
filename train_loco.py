@@ -19,7 +19,7 @@ def train(args):
     set_seeds()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32 if args.students_blocks == 'Both_ViT' else torch.bfloat16
+    dtype = torch.bfloat16
 
     model_name = f'{args.label}_{args.class_name}_{args.epochs_no}ep_{args.batch_size}bs'
 
@@ -47,34 +47,34 @@ def train(args):
     teacher = None
 
     if args.students_blocks == 'Both_ViT':
-        # --- ViT Bidirectional, Residual MLP ---
+        # --- ViT Bidirectional, Standard MLP ---
         
         # Teacher
-        teacher = ViTFeatureExtractor(layers=[1, 5]).to(device).eval()
+        teacher = ViTFeatureExtractor(layers=[21, 25]).to(device, dtype=dtype).eval()
         
         # Students (Residual Architecture)
         students['backward_net'] = FeatureProjectionMLP(
             in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=0.4
-        ).to(device)
+        ).to(device, dtype=dtype)
         students['forward_net'] = FeatureProjectionMLP(
             in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=0.4
-        ).to(device)
+        ).to(device, dtype=dtype)
 
     elif args.students_blocks == 'Both_LLM':
         # --- LLM Bidirectional, Standard MLP ---
 
         # Teacher
-        if args.class_name not in PROMPTS_CONFIG:
-            raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
-        teacher = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[args.class_name],
-                                      layer1_idx=0, layer2_idx=1).to(device).eval()
+        # if f'grounding_s_{args.class_name}' not in PROMPTS_CONFIG:
+        #     raise ValueError(f"\nERROR: Prompt for '{args.class_name}' class is missing.\n")
+        teacher = LLMFeatureExtractor(conversation_template=PROMPTS_CONFIG[f'generic'],
+                                      layer1_idx=2, layer2_idx=3).to(device).eval()
         
         # Students (Standard Architecture)
         students['backward_net'] = FeatureProjectionMLP(
-            in_features=teacher.embed_dim, out_features=teacher.embed_dim
+            in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=0.4
         ).to(device=device, dtype=dtype)
         students['forward_net'] = FeatureProjectionMLP(
-            in_features=teacher.embed_dim, out_features=teacher.embed_dim
+            in_features=teacher.embed_dim, out_features=teacher.embed_dim, reduction_factor=0.4
         ).to(device=device, dtype=dtype)
 
     else:
@@ -88,7 +88,7 @@ def train(args):
     cos_sim = torch.nn.CosineSimilarity(dim=-1, eps=1e-06)
 
     # --- Training Loop ---
-    for epoch in trange(args.epochs_no, desc='Training students...'):
+    for epoch in trange(args.epochs_no, desc=f'Training students for {args.class_name}...'):
 
         for model in students.values():
             model.train()
@@ -99,7 +99,7 @@ def train(args):
             
             # Prepare Input
             if args.students_blocks == 'Both_ViT':
-                input_data = tensor_img.to(device)
+                input_data = tensor_img.to(device, dtype=dtype)
             else:
                 input_data = pil_img
 
@@ -112,8 +112,8 @@ def train(args):
             predicted_earlier_patch = students['backward_net'](later_patch)
 
             # Losses
-            loss_later = 1 - cos_sim(predicted_later_patch, later_patch).mean()
-            loss_earlier = 1 - cos_sim(predicted_earlier_patch, earlier_patch).mean()
+            loss_later = 1 - cos_sim(predicted_later_patch.float(), later_patch.float()).mean()
+            loss_earlier = 1 - cos_sim(predicted_earlier_patch.float(), earlier_patch.float()).mean()
             loss = loss_later + loss_earlier
 
             # Logging & Optimization
@@ -143,7 +143,7 @@ def train(args):
                 
                 # Prepare Input
                 if args.students_blocks == 'Both_ViT':
-                    input_data = tensor_img.to(device)
+                    input_data = tensor_img.to(device, dtype=dtype)
                 else:
                     input_data = pil_img
 
@@ -152,8 +152,8 @@ def train(args):
                 predicted_later_patch = students['forward_net'](earlier_patch)
                 predicted_earlier_patch = students['backward_net'](later_patch)
 
-                loss_later = 1 - cos_sim(predicted_later_patch, later_patch).mean()
-                loss_earlier = 1 - cos_sim(predicted_earlier_patch, earlier_patch).mean()
+                loss_later = 1 - cos_sim(predicted_later_patch.float(), later_patch.float()).mean()
+                loss_earlier = 1 - cos_sim(predicted_earlier_patch.float(), earlier_patch.float()).mean()
                 loss = loss_later + loss_earlier
 
                 global_val_loss.append(loss.item())
@@ -195,10 +195,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default = 4, type = int,
                         help = 'Batch dimension. Usually 16 is around the max.')
     
-    parser.add_argument('--students_blocks', type=str, default='Both_ViT', choices=['Both_ViT', 'Both_LLM'],
+    parser.add_argument('--students_blocks', type=str, default='Both_LLM', choices=['Both_ViT', 'Both_LLM'],
                         help='Training scenario: where the 2 students extract features from')
     
-    parser.add_argument('--label', default='vit_norm_0.4', type=str,
+    parser.add_argument('--label', default='llm_2_3', type=str,
                         help='Label to identify the experiment.')
 
     args = parser.parse_args()
