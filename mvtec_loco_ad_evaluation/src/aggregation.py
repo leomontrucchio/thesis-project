@@ -527,4 +527,9 @@ class MetricsAggregator:
         # to form the list of thresholds, sorted in descending order.
         thresholds = equiheight_scores.tolist()[::-1]
         thresholds = [max_threshold] + thresholds + [min_threshold]
+
+        # NOT ORIGINAL: Ensure uniqueness while preserving descending order to avoid AssertionError
+        thresholds = sorted(list(set(thresholds)), reverse=True)
+        # ------
+
         return thresholds
