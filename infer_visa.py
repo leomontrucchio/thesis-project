@@ -145,6 +145,15 @@ def infer(args):
         defect_class_str = rgb_path[0].split('/')[-3]
         image_name_str = rgb_path[0].split('/')[-1]
 
+        # Get Original Dimensions
+        orig_w, orig_h = pil_img[0].size
+        
+        # Calculate the "Internal" Dimensions based on ImageOps
+        target_size = args.img_size # 384
+        scale = min(target_size / orig_w, target_size / orig_h)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+
         with torch.no_grad():
             tensor_img = tensor_img.to(device, dtype=dtype)
             
@@ -217,8 +226,8 @@ def infer(args):
                 
                 combined_anomaly_map = vit_comb * llm_comb
 
-            # Upsample to original resolution.
-            combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size=[max_hw, max_hw], mode='bilinear')
+            # Upsample to the Input Size
+            combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size=(target_size, target_size), mode='bilinear')
 
             # Approximated Gaussian blur.
             for _ in range(5):
@@ -226,15 +235,18 @@ def infer(args):
             for _ in range(3):
                 combined_anomaly_map = torch.nn.functional.conv2d(input=combined_anomaly_map, padding=pad_u, weight=weight_u)
 
-            combined_anomaly_map = combined_anomaly_map.reshape(max_hw, max_hw)
-            combined_anomaly_map = torchvision.transforms.functional.center_crop(combined_anomaly_map, gt.shape[-2:])
+            # Remove the Padding (Inverse of DeepSeekPad)
+            combined_anomaly_map = torchvision.transforms.functional.center_crop(combined_anomaly_map, [new_h, new_w])
+
+            # Resize back to Original Dimensions
+            combined_anomaly_map = torch.nn.functional.interpolate(combined_anomaly_map, size=(orig_h, orig_w), mode='bilinear')
 
             end_event.record()
             torch.cuda.synchronize()
             inference_time.append(start_event.elapsed_time(end_event))
 
             # Accumulation
-            map_np = combined_anomaly_map.to(torch.float32).cpu().detach().numpy()
+            map_np = combined_anomaly_map.squeeze().cpu().detach().numpy()
             gt_np = gt.squeeze().cpu().detach().numpy()
 
             gts.append(gt_np)
